@@ -55,3 +55,10 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Azure Functions
+local.settings.json
+
+# Artefatos de publicacao
+publish/
+app.zip

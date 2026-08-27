@@ -1,59 +1,31 @@
-using System.Text.Json.Serialization;
-using FiapGames.Notifications.Configuration;
-using FiapGames.Notifications.Data;
 using FiapGames.Notifications.Services;
-using MassTransit;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Azure.Functions.Worker;
+using Microsoft.Azure.Functions.Worker.Builder;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = FunctionsApplication.CreateBuilder(args);
 
-var rabbitMqOptions = builder.Configuration.GetSection(RabbitMqOptions.SectionName).Get<RabbitMqOptions>()
-    ?? new RabbitMqOptions();
+builder.ConfigureFunctionsWebApplication();
 
-builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection(SmtpOptions.SectionName));
+builder.Services.AddApplicationInsightsTelemetryWorkerService();
+builder.Services.ConfigureFunctionsApplicationInsights();
 
-builder.Services.AddDbContext<NotificationsDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")));
-
-builder.Services.AddScoped<IEmailService, EmailService>();
-
-builder.Services.AddMassTransit(busConfigurator =>
+// O provider de Application Insights do worker isolado registra um filtro padrão
+// que descarta tudo abaixo de Warning. Sem remover essa regra, os logs de
+// Information do NotificationService nunca chegam ao Application Insights.
+builder.Services.Configure<LoggerFilterOptions>(options =>
 {
-    busConfigurator.AddConsumers(typeof(Program).Assembly);
+    var defaultRule = options.Rules.FirstOrDefault(rule =>
+        rule.ProviderName == "Microsoft.Extensions.Logging.ApplicationInsights.ApplicationInsightsLoggerProvider");
 
-    busConfigurator.UsingRabbitMq((context, rabbitMqConfigurator) =>
+    if (defaultRule is not null)
     {
-        rabbitMqConfigurator.Host(rabbitMqOptions.Host, rabbitMqOptions.VirtualHost, host =>
-        {
-            host.Username(rabbitMqOptions.UserName);
-            host.Password(rabbitMqOptions.Password);
-        });
-
-        rabbitMqConfigurator.ConfigureJsonSerializerOptions(options =>
-        {
-            options.Converters.Add(new JsonStringEnumConverter());
-            return options;
-        });
-
-        rabbitMqConfigurator.ConfigureEndpoints(context, new KebabCaseEndpointNameFormatter("notifications", false));
-    });
+        options.Rules.Remove(defaultRule);
+    }
 });
 
-builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSingleton<INotificationService, NotificationService>();
 
-var app = builder.Build();
-
-using (var scope = app.Services.CreateScope())
-{
-    var dbContext = scope.ServiceProvider.GetRequiredService<NotificationsDbContext>();
-    await dbContext.Database.MigrateAsync();
-}
-
-app.UseSwagger();
-app.UseSwaggerUI();
-
-app.MapControllers();
-
-app.Run();
+builder.Build().Run();

@@ -62,3 +62,5 @@ local.settings.json
 # Artefatos de publicacao
 publish/
 app.zip
+
+.vs

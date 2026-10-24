@@ -1,0 +1,90 @@
+name: Deploy Lambda
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  PROJECT: FiapGames.Notifications/FiapGames.Notifications.csproj
+  # Executable assembly: o handler é o nome do assembly
+  HANDLER: FiapGames.Notifications
+  RUNTIME: dotnet10
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish
+        run: dotnet publish ${{ env.PROJECT }} -c Release -r linux-x64 --self-contained false -o publish
+
+      - name: Zip
+        run: cd publish && zip -qr ../app.zip .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app
+          path: app.zip
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: app
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Deploy code
+        env:
+          FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+        run: |
+          # A função é criada pelo console; aqui só atualiza código e configuração
+          aws lambda update-function-code --function-name "$FUNCTION_NAME" \
+            --zip-file fileb://app.zip > /dev/null
+          aws lambda wait function-updated-v2 --function-name "$FUNCTION_NAME"
+
+          aws lambda update-function-configuration --function-name "$FUNCTION_NAME" \
+            --runtime "$RUNTIME" --handler "$HANDLER" --timeout 30 --memory-size 512 > /dev/null
+          aws lambda wait function-updated-v2 --function-name "$FUNCTION_NAME"
+
+      - name: Ensure Function URL
+        env:
+          FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+        run: |
+          if ! aws lambda get-function-url-config --function-name "$FUNCTION_NAME" > /dev/null 2>&1; then
+            # AWS_IAM: só quem tiver permissão via IAM (ex.: roles dos pods do EKS) invoca
+            aws lambda create-function-url-config --function-name "$FUNCTION_NAME" \
+              --auth-type AWS_IAM > /dev/null
+          fi
+
+          URL=$(aws lambda get-function-url-config --function-name "$FUNCTION_NAME" \
+            --query FunctionUrl --output text)
+          echo "Function URL: $URL"
+          echo "### Function URL: $URL" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Smoke test
+        env:
+          FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+        run: |
+          URL=$(aws lambda get-function-url-config --function-name "$FUNCTION_NAME" \
+            --query FunctionUrl --output text)
+          # Function URL com AWS_IAM exige requisição assinada (SigV4)
+          curl -fsS --retry 5 --retry-delay 3 --retry-all-errors \
+            --aws-sigv4 "aws:amz:$AWS_REGION:lambda" \
+            --user "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" \
+            "${URL%/}/api/health"

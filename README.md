@@ -1,31 +1,44 @@
 # FiapGames.Notifications
 
-Microsserviço de notificações da plataforma FiapGames, implementado como **Azure Functions serverless** (.NET 10 isolated). Expõe endpoints HTTP que recebem os eventos de integração e registram a notificação correspondente no log.
+Microsserviço de notificações da plataforma FiapGames, implementado como **AWS Lambda** (.NET 10, ASP.NET Core Minimal API). Expõe endpoints HTTP que recebem os eventos de integração e registram a notificação correspondente no log.
 
 ## Arquitetura
 
-- **Runtime:** Azure Functions v4 · .NET 10 · modelo *isolated worker*
-- **Gatilhos:** HTTP
+- **Runtime:** AWS Lambda `dotnet10` · uma única função com `Amazon.Lambda.AspNetCoreServer.Hosting`
+- **Gatilho:** Lambda Function URL (HTTP)
 - **Contratos:** pacote `FiapGames.Contracts` (mesmos eventos usados pelos demais microsserviços)
-- **Saída:** log da aplicação — console em execução local, Application Insights no Azure
+- **Saída:** log da aplicação — console em execução local, CloudWatch Logs na AWS
 
 Sem banco de dados, sem SMTP e sem broker de mensageria.
 
 ## Publicado em
 
-```
-https://fiap-games-notification-hdaza0g6fudjc3ak.westus3-01.azurewebsites.net
-```
+A URL da Function URL é exibida no summary de cada execução do workflow **Deploy Lambda**.
 
-Ver [DEPLOY-ROADMAP.md](DEPLOY-ROADMAP.md) para o histórico da publicação.
+Ver [DEPLOY-ROADMAP.md](DEPLOY-ROADMAP.md) para o histórico da publicação anterior no Azure.
 
 ## Endpoints
 
 | Método | Rota | Auth | Descrição |
 |---|---|---|---|
-| `GET` | `/api/health` | Anônimo | Health check |
-| `POST` | `/api/notifications/user-created` | Function key | Notificação de boas-vindas |
-| `POST` | `/api/notifications/payment-processed` | Function key | Confirmação ou rejeição de compra |
+| `GET` | `/api/health` | IAM | Health check |
+| `POST` | `/api/notifications/user-created` | IAM | Notificação de boas-vindas |
+| `POST` | `/api/notifications/payment-processed` | IAM | Confirmação ou rejeição de compra |
+
+### Autenticação (AWS_IAM)
+
+A Function URL usa `AuthType: AWS_IAM`: toda requisição precisa ser assinada com SigV4 (serviço `lambda`). Os pods do EKS que chamam o serviço usam uma role (IRSA ou EKS Pod Identity) com a policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["lambda:InvokeFunctionUrl", "lambda:InvokeFunction"],
+    "Resource": "arn:aws:lambda:us-east-2:<account-id>:function:<nome-da-funcao>"
+  }]
+}
+```
 
 Ambos os `POST` respondem `202 Accepted` em caso de sucesso e `400 Bad Request` se o corpo for inválido.
 
@@ -56,52 +69,43 @@ Ambos os `POST` respondem `202 Accepted` em caso de sucesso e `400 Bad Request` 
 
 ## Executando Localmente
 
-**Pré-requisito:** [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local)
-
 ```bash
 cd FiapGames.Notifications
-func start
+dotnet run
 ```
 
-Os endpoints sobem em `http://localhost:7071`. Em execução local a *function key* não é exigida:
+Localmente não há autenticação:
 
 ```bash
-curl http://localhost:7071/api/health
+curl http://localhost:5000/api/health
 
-curl -X POST http://localhost:7071/api/notifications/user-created \
+curl -X POST http://localhost:5000/api/notifications/user-created \
   -H "Content-Type: application/json" \
   -d '{"userId":"11111111-1111-1111-1111-111111111111","name":"Lucas","email":"lucas@fiapgames.local","createdAt":"2026-08-26T12:00:00Z"}'
 ```
 
-## Publicando no Azure
+## Deploy (GitHub Actions)
 
-```bash
-dotnet publish FiapGames.Notifications -c Release -o ./publish
-cd publish && zip -r ../app.zip . && cd ..
+O workflow `.github/workflows/deploy.yml` faz build em todo PR e, em push na `main` (ou execução manual), publica na Lambda. A função é criada pelo console da AWS; o workflow atualiza código e configuração e cria a Function URL se ainda não existir.
 
-az functionapp deployment source config-zip \
-  -g fiap-games -n fiap-games-notification --src app.zip
-```
+Configuração no repositório (Settings → Secrets and variables → Actions; modelo no `.env` local, que não é commitado):
 
-Recuperar a *function key* para chamar os endpoints protegidos:
-
-```bash
-az functionapp function keys list \
-  -g fiap-games -n fiap-games-notification --function-name UserCreated
-```
-
-E então incluir no header `x-functions-key`.
+| Nome | Tipo | Valor |
+|---|---|---|
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Secret | Credenciais do usuário IAM de deploy |
+| `AWS_REGION` | Variable | `us-east-2` |
+| `LAMBDA_FUNCTION_NAME` | Variable | `fiap-games-notification` |
 
 ## Estrutura
 
 ```
 FiapGames.Notifications/
-├── Program.cs                  host isolated + DI + Application Insights
-├── host.json                   routePrefix e logging
-├── Functions/
-│   ├── HealthFunction.cs
-│   ├── UserCreatedFunction.cs
-│   └── PaymentProcessedFunction.cs
+├── Program.cs                  host ASP.NET Core + Lambda hosting + DI
+├── appsettings.json            níveis de log
+├── Endpoints/
+│   ├── HealthEndpoint.cs
+│   ├── UserCreatedEndpoint.cs
+│   └── PaymentProcessedEndpoint.cs
 ├── Services/
 │   ├── INotificationService.cs
 │   └── NotificationService.cs  monta assunto/corpo e registra no log

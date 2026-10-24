@@ -88,13 +88,13 @@ curl -X POST http://localhost:5000/api/notifications/user-created \
 
 O workflow `.github/workflows/deploy.yml` faz build em todo PR e, em push na `main` (ou execução manual), publica na Lambda. A função é criada pelo console da AWS; o workflow atualiza código e configuração e cria a Function URL se ainda não existir.
 
-Secrets necessários no repositório (modelo no `.env` local, que não é commitado):
+Configuração no repositório (Settings → Secrets and variables → Actions; modelo no `.env` local, que não é commitado):
 
-| Secret | Descrição |
-|---|---|
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Credenciais do usuário IAM de deploy |
-| `AWS_REGION` | `us-east-2` |
-| `LAMBDA_FUNCTION_NAME` | Nome da função (ex.: `fiap-games-notification`) |
+| Nome | Tipo | Valor |
+|---|---|---|
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Secret | Credenciais do usuário IAM de deploy |
+| `AWS_REGION` | Variable | `us-east-2` |
+| `LAMBDA_FUNCTION_NAME` | Variable | `fiap-games-notification` |
 
 ## Estrutura
 

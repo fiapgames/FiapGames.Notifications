@@ -47,11 +47,11 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Deploy code
         env:
-          FUNCTION_NAME: ${{ secrets.LAMBDA_FUNCTION_NAME }}
+          FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
         run: |
           # A função é criada pelo console; aqui só atualiza código e configuração
           aws lambda update-function-code --function-name "$FUNCTION_NAME" \
@@ -64,7 +64,7 @@ jobs:
 
       - name: Ensure Function URL
         env:
-          FUNCTION_NAME: ${{ secrets.LAMBDA_FUNCTION_NAME }}
+          FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
         run: |
           if ! aws lambda get-function-url-config --function-name "$FUNCTION_NAME" > /dev/null 2>&1; then
             # AWS_IAM: só quem tiver permissão via IAM (ex.: roles dos pods do EKS) invoca
@@ -79,7 +79,7 @@ jobs:
 
       - name: Smoke test
         env:
-          FUNCTION_NAME: ${{ secrets.LAMBDA_FUNCTION_NAME }}
+          FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
         run: |
           URL=$(aws lambda get-function-url-config --function-name "$FUNCTION_NAME" \
             --query FunctionUrl --output text)

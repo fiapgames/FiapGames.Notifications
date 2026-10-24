@@ -2,19 +2,18 @@ using System.Text.Json;
 using FiapGames.Contracts.IntegrationEvents;
 using FiapGames.Notifications.Serialization;
 using FiapGames.Notifications.Services;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.Azure.Functions.Worker;
-using Microsoft.Extensions.Logging;
 
-namespace FiapGames.Notifications.Functions;
+namespace FiapGames.Notifications.Endpoints;
 
-public class PaymentProcessedFunction(INotificationService notifications, ILogger<PaymentProcessedFunction> logger)
+public static class PaymentProcessedEndpoint
 {
-    [Function(nameof(PaymentProcessed))]
-    public async Task<IActionResult> PaymentProcessed(
-        [HttpTrigger(AuthorizationLevel.Function, "post", Route = "notifications/payment-processed")] HttpRequest req)
+    public static void MapPaymentProcessed(this IEndpointRouteBuilder routes) =>
+        routes.MapPost("/notifications/payment-processed", PaymentProcessed);
+
+    private static async Task<IResult> PaymentProcessed(
+        HttpRequest req, INotificationService notifications, ILoggerFactory loggerFactory)
     {
+        var logger = loggerFactory.CreateLogger(typeof(PaymentProcessedEndpoint));
         PaymentProcessedEvent? paymentProcessed;
 
         try
@@ -24,12 +23,12 @@ public class PaymentProcessedFunction(INotificationService notifications, ILogge
         catch (JsonException ex)
         {
             logger.LogWarning(ex, "Corpo inválido recebido em payment-processed");
-            return new BadRequestObjectResult(new { error = "JSON inválido.", detail = ex.Message });
+            return Results.BadRequest(new { error = "JSON inválido.", detail = ex.Message });
         }
 
         if (paymentProcessed is null)
         {
-            return new BadRequestObjectResult(new { error = "Corpo da requisição vazio." });
+            return Results.BadRequest(new { error = "Corpo da requisição vazio." });
         }
 
         logger.LogInformation("Received PaymentProcessedEvent for order {OrderId} with status {Status}",
@@ -46,6 +45,6 @@ public class PaymentProcessedFunction(INotificationService notifications, ILogge
                 paymentProcessed.OrderId, paymentProcessed.UserId, paymentProcessed.GameId);
         }
 
-        return new AcceptedResult();
+        return Results.Accepted();
     }
 }

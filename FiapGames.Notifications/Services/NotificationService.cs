@@ -4,7 +4,7 @@ namespace FiapGames.Notifications.Services;
 
 /// <summary>
 /// Registra as notificações no log da aplicação — console em execução local,
-/// Application Insights quando publicado no Azure.
+/// CloudWatch Logs quando publicado na AWS Lambda.
 /// </summary>
 public class NotificationService(ILogger<NotificationService> logger) : INotificationService
 {
